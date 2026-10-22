@@ -44,7 +44,7 @@ Do changes in unemployment and mortgage rates explain quarterly changes in the U
 - **The full-sample result is weak because of 2020.** Using all 141 quarters, the same coefficient falls to about 0.07 (t ≈ 1.1). Dropping only the four 2020 quarters restores it to 0.69 (t ≈ 3.5). The data don't say why, though forbearance is a plausible candidate.
 - **Mortgage rate changes add little.** The rate coefficient is insignificant in every model except a 22-quarter sample from 2021 onward, where Newey-West standard errors are unreliable, so I treat that result as suggestive only.
 
-These are associations, not causal estimates.
+These are associations, not causal estimates. M5 residuals have a Durbin-Watson of 1.05 (`python3 analysis.py --diagnostics`), well below 2, so errors carry from one quarter into the next; that is why every model uses Newey-West (HAC) standard errors. The 0.83 says how the two series moved together before 2020, not what unemployment causes, and it is not a forecast.
 
 <details>
 <summary>Full Model Tables</summary>
@@ -76,7 +76,7 @@ flowchart LR
   F["FRED CSVs in data/<br/>DRSFRMACBS, UNRATE, MORTGAGE30US"] --> P["analysis.build_panel<br/>Quarterly Averages and Changes"]
   P --> M["analysis.run_model<br/>OLS and Newey-West via ols.py"]
   M --> R["analysis.report<br/>Six Models to the Terminal"]
-  P --> S["panel.csv"]
+  P --> S["output/panel.csv"]
   M --> C["charts.py<br/>SVG Visuals, Light and Dark"]
   M --> X["plots_mpl.py<br/>Optional PNGs"]
   C --> D["docs/*.svg"]
@@ -85,7 +85,7 @@ flowchart LR
 ## Quickstart
 
 ```bash
-python3 analysis.py            # prints the six models and writes panel.csv
+python3 analysis.py            # prints the six models and writes output/panel.csv
 python3 analysis.py --diagnostics   # also prints ADF and Durbin-Watson checks
 python3 analysis.py --scenario scenarios/illustrative.csv   # 9-quarter scenario projection
 python3 analysis.py --scenario scenarios/fed_2026.csv --rebase   # Federal Reserve 2026 paths
@@ -180,7 +180,7 @@ M6  M2, 2021 onward (short sample)   n=22  R²=0.366
   d_unemp            0.117     0.029    4.06
   d_rate            -0.057     0.016   -3.58
 
-Wrote panel.csv
+Wrote output/panel.csv
 ```
 
 </details>
@@ -228,7 +228,7 @@ python3 analysis.py --scenario scenarios/illustrative.csv
 python3 analysis.py --scenario scenarios/illustrative.csv --model M5 --roll-rate 0.15 --lgd 0.30 --portfolio 25000
 ```
 
-The scenario file is a CSV with `scenario,quarter,unemployment,mortgage_rate` columns (levels, in percent). Each scenario must cover exactly the 9 quarters after the last observed quarter (2026Q3 to 2028Q3), or the run stops with an error naming the missing quarters. Reading a scenario file writes nothing, so `panel.csv` is untouched.
+The scenario file is a CSV with `scenario,quarter,unemployment,mortgage_rate` columns (levels, in percent). Each scenario must cover exactly the 9 quarters after the last observed quarter (2026Q3 to 2028Q3), or the run stops with an error naming the missing quarters. Reading a scenario file writes nothing.
 
 **Which Model.** M4 by default (M2 without the four 2020 quarters, n = 137), because 2020 distorts the full-sample fit. `--model` takes M1 to M6; M3 uses the last observed change for its first lag. Each projected quarter is the model's change, $\hat\beta^\top x_t$, where $x_t$ holds the change in each path versus the prior quarter. The changes are summed onto the last observed rate (1.86% in 2026Q2).
 
@@ -250,6 +250,17 @@ python3 analysis.py --scenario scenarios/fed_2026.csv --rebase
 | Severely adverse | 10.0% | 5.04% (2.48 to 7.61) | 2.42% | 3.03% (1.23 to 4.83) | 1.52% |
 
 Loss rates use the default teaching placeholders (20% roll rate, 25% LGD, 9 quarters). Re-based peak unemployment is 7.1% for the severely adverse path.
+
+**Loss Rate Range (CECL-Style View, Placeholder Inputs).** The same runs as a range: the 9-quarter cumulative loss rate at the low end of the delinquency band, the point projection and the high end, on the illustrative $10,000 million portfolio. The Fed's 2026 set has only two scenarios (no adverse), so there are two rows per run. The 20% roll rate and 25% LGD are uncalibrated placeholders, not estimates, so read the shape and the gap between scenarios, not the levels.
+
+| Fed 2026 Scenario (M4) | Run | Loss Rate, Low | Loss Rate, Point | Loss Rate, High | Point Loss, $mm |
+|---|---|---:|---:|---:|---:|
+| Baseline | As published | 0.41% | 0.91% | 1.40% | 90.8 |
+| Severely adverse | As published | 1.35% | 2.42% | 3.50% | 242.4 |
+| Baseline | Re-based | 0.32% | 0.81% | 1.29% | 80.6 |
+| Severely adverse | Re-based | 0.85% | 1.52% | 2.18% | 151.8 |
+
+Not a CECL estimate: there is no lifetime horizon, cure, amortization, recovery timing or discounting. Reproduce with `python3 analysis.py --scenario scenarios/fed_2026.csv` (add `--rebase` for the re-based rows) and change `--roll-rate` and `--lgd` to test other inputs.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/scenario_paths-dark.svg">
@@ -339,7 +350,7 @@ Python · Econometrics · Time Series · Data Visualization
 
 ```
 MortgageDelinquencyDrivers/
-├── analysis.py              builds the quarterly panel, runs the six models, writes panel.csv
+├── analysis.py              builds the quarterly panel, runs the six models, writes output/panel.csv
 ├── ols.py                   matrix inverse, OLS, Newey-West standard errors
 ├── scenario.py              scenario projection with bands, loss illustration
 ├── scenarios/               scenario paths (CSV): illustrative and Federal Reserve 2026, with sources
@@ -350,7 +361,7 @@ MortgageDelinquencyDrivers/
 ├── requirements-extra.txt   optional matplotlib dependency
 ├── data/                    pinned FRED snapshot
 ├── docs/                    SVG visuals (light and -dark), sample output, docs/mpl/ PNGs
-├── panel.csv                the quarterly panel behind the models
+├── panel.csv                committed snapshot of the quarterly panel (runs write output/, ignored by git)
 └── LICENSE
 ```
 

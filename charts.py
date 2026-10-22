@@ -185,7 +185,7 @@ def line_svg(rows: List[dict], t: dict) -> str:
         return L + (i + 0.5) * slot
 
     p: List[str] = [
-        text(L, 36, "Single-Family Mortgage Delinquency Rate, 1991Q2 to 2026Q2", 18, color=t["title"], weight="bold"),
+        text(L, 36, f"Single-Family Mortgage Delinquency Rate, {rows[0]['quarter']} to {rows[-1]['quarter']}", 18, color=t["title"], weight="bold"),
         text(L, 58, "FRED DRSFRMACBS, quarterly. Shaded quarters are NBER recessions.", 12),
     ]
     p.append(f'<rect x="{L + 300}" y="{86 - 10}" width="14" height="12" fill="{t["shade"]}" fill-opacity="0.8"/>')
@@ -421,7 +421,7 @@ def sample_output_lines(rows: List[dict]) -> List[str]:
     with contextlib.redirect_stdout(buf):
         report(rows)
     out = buf.getvalue().rstrip("\n").split("\n")
-    return ["$ python3 analysis.py"] + out + ["Wrote panel.csv"]
+    return ["$ python3 analysis.py"] + out + ["Wrote output/panel.csv"]
 
 
 def build_all(rows: List[dict]) -> Dict[str, Dict[str, str]]:

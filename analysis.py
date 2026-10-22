@@ -9,7 +9,7 @@ Models regress the quarter-over-quarter change in delinquency (percentage points
 changes in unemployment and mortgage rates, with Newey-West standard errors.
 Associations only. These are not causal estimates.
 
-Usage: python3 analysis.py [--panel panel.csv] [--diagnostics]
+Usage: python3 analysis.py [--panel output/panel.csv] [--diagnostics]
        python3 analysis.py --scenario scenarios/illustrative.csv [--model M4] [--roll-rate 0.20] [--lgd 0.25] [--portfolio 10000]
 """
 
@@ -122,7 +122,7 @@ MODELS = [
     ("M3  + one-quarter lags", ["d_unemp", "d_unemp_lag", "d_rate", "d_rate_lag"], False, None),
     ("M4  M2 excluding 2020 pandemic", ["d_unemp", "d_rate"], True, None),
     ("M5  M2, pre-2020 sample", ["d_unemp", "d_rate"], False, ("1991Q1", "2019Q4")),
-    ("M6  M2, 2021 onward (short sample)", ["d_unemp", "d_rate"], False, ("2021Q1", "2026Q2")),
+    ("M6  M2, 2021 onward (short sample)", ["d_unemp", "d_rate"], False, ("2021Q1", "9999Q4")),  # open-ended: grows as new quarters are fetched
 ]
 
 
@@ -153,7 +153,8 @@ def diagnostics_report(rows: List[dict]) -> None:
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--panel", default="panel.csv")
+    # Regenerated output goes to an ignored folder so a run never dirties the committed panel.csv snapshot.
+    parser.add_argument("--panel", default=os.path.join("output", "panel.csv"))
     parser.add_argument("--diagnostics", action="store_true", help="also print ADF and Durbin-Watson")
     parser.add_argument("--scenario", help="CSV of scenario paths; prints the projection and loss illustration, writes nothing")
     parser.add_argument("--rebase", action="store_true", help="shift each scenario so its last-observed-quarter row equals the observed levels")
@@ -177,11 +178,13 @@ def main(argv=None):
         diagnostics_report(rows)
 
     cols = ["quarter", "delinquency", "d_delinq", "d_unemp", "d_rate", "d_unemp_lag", "d_rate_lag"]
+    os.makedirs(os.path.dirname(args.panel) or ".", exist_ok=True)
     with open(args.panel, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         for r in rows:
-            w.writerow({c: (round(r[c], 4) if isinstance(r[c], float) else r[c]) for c in cols})
+            # + 0.0 turns a rounded -0.0 into 0.0 so the file does not flip between runs
+            w.writerow({c: (round(r[c], 4) + 0.0 if isinstance(r[c], float) else r[c]) for c in cols})
     print(f"Wrote {args.panel}")
 
 

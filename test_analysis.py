@@ -313,6 +313,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(header, "quarter,delinquency,d_delinq,d_unemp,d_rate,d_unemp_lag,d_rate_lag")
         self.assertIn("Wrote", buf.getvalue())
 
+    def test_default_run_writes_ignored_output_folder(self):
+        import analysis
+        import contextlib, io
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    analysis.main([])
+                with open(os.path.join("output", "panel.csv")) as f:
+                    fields = f.read().replace("\n", ",").split(",")
+            finally:
+                os.chdir(cwd)
+        self.assertFalse(os.path.exists(os.path.join(tmp, "panel.csv")))
+        self.assertNotIn("-0.0", fields)
+
     def test_diagnostics_flag_adds_section(self):
         import analysis
         import contextlib, io
@@ -489,6 +505,13 @@ class ScenarioTests(unittest.TestCase):
             sev, base = res["severely_adverse"]["proj"], res["baseline"]["proj"]
             self.assertEqual(len(sev), 9)
             self.assertGreater(sev[-1]["level"], base[-1]["level"])
+            # README loss range table: low <= point <= high, and severe above baseline at every point
+            for r in res.values():
+                L = r["loss"]
+                self.assertLessEqual(L["lo"]["pct"], L["level"]["pct"])
+                self.assertLessEqual(L["level"]["pct"], L["hi"]["pct"])
+            for key in ("lo", "level", "hi"):
+                self.assertGreater(res["severely_adverse"]["loss"][key]["pct"], res["baseline"]["loss"][key]["pct"])
         self.assertAlmostEqual(sev[0]["unemployment"], 8.2 + start["unemployment"] - 7.2)
 
     def test_cli_prints_projection_and_rejects_bad_file(self):
