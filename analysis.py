@@ -9,7 +9,8 @@ Models regress the quarter-over-quarter change in delinquency (percentage points
 changes in unemployment and mortgage rates, with Newey-West standard errors.
 Associations only. These are not causal estimates.
 
-Usage: python3 analysis.py [--panel panel.csv]
+Usage: python3 analysis.py [--panel panel.csv] [--diagnostics]
+       python3 analysis.py --scenario scenarios/illustrative.csv [--model M4] [--roll-rate 0.20] [--lgd 0.25] [--portfolio 10000]
 """
 
 import argparse
@@ -20,7 +21,8 @@ import os
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from ols import ols
+from diagnostics import adf, durbin_watson
+from ols import default_nw_lags, ols
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 PANDEMIC = ("2020Q1", "2020Q4")   # forbearance and the spike distort this period
@@ -49,12 +51,16 @@ def quarterly_mean(series: List[Tuple[str, float]]) -> Dict[str, float]:
     return {q: sum(vs) / len(vs) for q, vs in buckets.items()}
 
 
-def build_panel() -> List[dict]:
-    delinq = {quarter_key(d): v for d, v in load(os.path.join(DATA_DIR, "DRSFRMACBS.csv"))}
-    unemp = quarterly_mean(load(os.path.join(DATA_DIR, "UNRATE.csv")))
-    rate = quarterly_mean(load(os.path.join(DATA_DIR, "MORTGAGE30US.csv")))
+def build_panel(data_dir: str = DATA_DIR) -> List[dict]:
+    delinq = {quarter_key(d): v for d, v in load(os.path.join(data_dir, "DRSFRMACBS.csv"))}
+    unemp = quarterly_mean(load(os.path.join(data_dir, "UNRATE.csv")))
+    rate = quarterly_mean(load(os.path.join(data_dir, "MORTGAGE30US.csv")))
 
     quarters = sorted(set(delinq) & set(unemp) & set(rate))
+    all_q = range(int(quarters[0][:4]) * 4 + int(quarters[0][5]), int(quarters[-1][:4]) * 4 + int(quarters[-1][5]) + 1)
+    missing = [f"{(t - 1) // 4}Q{(t - 1) % 4 + 1}" for t in all_q if f"{(t - 1) // 4}Q{(t - 1) % 4 + 1}" not in quarters]
+    if missing:
+        raise ValueError("quarters missing from one or more series: " + ", ".join(missing))
     rows = []
     for i in range(1, len(quarters)):
         q, p = quarters[i], quarters[i - 1]
@@ -85,6 +91,7 @@ def run_model(rows: List[dict], xcols: List[str], exclude_pandemic: bool = False
     res = ols(X, y, nw_lags=4, index=[r["t_index"] for r in usable])
     res["names"] = ["const"] + xcols
     res["quarters"] = [r["quarter"] for r in usable]
+    res["index"] = [r["t_index"] for r in usable]
     res["y"] = y
     res["fitted"] = [yi - ei for yi, ei in zip(y, res["resid"])]
     return res
@@ -96,6 +103,8 @@ def pearson(a: List[float], b: List[float]) -> float:
     cov = sum((x - ma) * (y - mb) for x, y in zip(a, b))
     va = sum((x - ma) ** 2 for x in a)
     vb = sum((y - mb) ** 2 for y in b)
+    if va == 0 or vb == 0:
+        raise ValueError("correlation undefined for a constant series")
     return cov / math.sqrt(va * vb)
 
 
@@ -129,13 +138,43 @@ def report(rows: List[dict]) -> None:
         print()
 
 
-def main():
+def diagnostics_report(rows: List[dict]) -> None:
+    print("Diagnostics (not part of the model results)")
+    for col in ("delinquency", "d_delinq", "d_unemp", "d_rate"):
+        res = adf([r[col] for r in rows], lags=4)
+        verdict = "stationary at 5%" if res["reject_unit_root"]["5%"] else "unit root not rejected at 5%"
+        print(f"  ADF {col:<12} stat={res['stat']:>7.2f}  (5% crit {res['critical']['5%']:.2f})  {verdict}")
+    for title, xcols, excl, window in MODELS:
+        res = run_model(rows, xcols, excl, window)
+        print(f"  {title[:2]}  Durbin-Watson={durbin_watson(res['resid'], res['index']):.2f}  "
+              f"rule-of-thumb NW lags={default_nw_lags(res['n'])} (model uses 4)")
+    print()
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--panel", default="panel.csv")
-    args = parser.parse_args()
+    parser.add_argument("--diagnostics", action="store_true", help="also print ADF and Durbin-Watson")
+    parser.add_argument("--scenario", help="CSV of scenario paths; prints the projection and loss illustration, writes nothing")
+    parser.add_argument("--rebase", action="store_true", help="shift each scenario so its last-observed-quarter row equals the observed levels")
+    parser.add_argument("--model", default="M4", help="model used for the projection (M1 to M6)")
+    parser.add_argument("--roll-rate", type=float, default=0.20, help="quarterly share of delinquent balance rolling to default")
+    parser.add_argument("--lgd", type=float, default=0.25, help="loss given default")
+    parser.add_argument("--portfolio", type=float, default=10000.0, help="illustrative portfolio size, $ millions")
+    args = parser.parse_args(argv)
+
+    if args.scenario:
+        import scenario
+        try:
+            scenario.run(args.scenario, args.model, args.roll_rate, args.lgd, args.portfolio, args.rebase)
+        except ValueError as e:
+            parser.error(str(e))
+        return
 
     rows = build_panel()
     report(rows)
+    if args.diagnostics:
+        diagnostics_report(rows)
 
     cols = ["quarter", "delinquency", "d_delinq", "d_unemp", "d_rate", "d_unemp_lag", "d_rate_lag"]
     with open(args.panel, "w", newline="") as f:

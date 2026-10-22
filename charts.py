@@ -9,6 +9,7 @@ Files go into docs/:
   coefficients.svg                 unemployment-change coefficient for M1 to M6, with +/-2 Newey-West SE bars
   actual_vs_fitted.svg             model M2 actual and fitted quarterly changes
   driver_correlations.svg          correlation heatmap of the delinquency change and its drivers
+  scenario_paths.svg               delinquency history and 9-quarter scenario projections with 95% bands
   sample-output.svg                terminal-window render of `python3 analysis.py`
 
 Usage: python3 charts.py [--out docs]
@@ -22,6 +23,7 @@ import os
 from typing import Dict, List, Tuple
 from xml.sax.saxutils import escape
 
+import scenario
 from analysis import MODELS, PANDEMIC, build_panel, correlation_matrix, report, run_model
 
 DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
@@ -339,6 +341,44 @@ def heatmap_svg(rows: List[dict], t: dict) -> str:
     return wrap(W, H, "Correlation Heatmap of the Delinquency Change and Its Drivers", p)
 
 
+def scenario_svg(rows: List[dict], proj: Dict[str, List[dict]], t: dict) -> str:
+    W, H = 800, 440
+    L, R, T, B = 70, 130, 110, 60
+    pw, ph = W - L - R, H - T - B
+    hist = rows[-20:]
+    n = len(hist) + scenario.HORIZON
+    yt = nice_ticks(0, max(max(p["hi"] for p in ps) for ps in proj.values()))
+    sy = scaler(yt[0], yt[-1], T + ph, T)
+    x_of = lambda i: L + (i + 0.5) * pw / n
+    colors = {"baseline": t["zero"], "adverse": t["navy"], "severely_adverse": t["teal"]}
+    p: List[str] = [
+        text(L, 36, "Delinquency Rate Under Illustrative Scenarios", 18, color=t["title"], weight="bold"),
+        text(L, 58, f"Last 20 quarters observed, then {scenario.HORIZON} projected. Bands are 95%. Paths are illustrative inputs.", 12),
+    ]
+    for v in yt:
+        p.append(f'<line x1="{L}" y1="{sy(v):.1f}" x2="{L + pw}" y2="{sy(v):.1f}" stroke="{t["grid"]}"/>')
+        p.append(text(L - 10, sy(v) + 4, f"{v:.0f}" if v == int(v) else f"{v:.1f}", 12, "end"))
+    p.append(f'<line x1="{L}" y1="{T + ph}" x2="{L + pw}" y2="{T + ph}" stroke="{t["text"]}"/>')
+    for i, r in enumerate(hist):
+        if r["quarter"].endswith("Q1"):
+            p.append(text(x_of(i), T + ph + 20, r["quarter"][:4], 12, "middle"))
+    pts = " ".join(f"{x_of(i):.1f},{sy(r['delinquency']):.1f}" for i, r in enumerate(hist))
+    p.append(f'<polyline points="{pts}" fill="none" stroke="{t["text"]}" stroke-width="2.2" stroke-linejoin="round"/>')
+    k = len(hist)
+    for name, ps in proj.items():
+        col = colors.get(name, t["navy"])
+        xs = [x_of(k - 1)] + [x_of(k + j) for j in range(len(ps))]
+        last = hist[-1]["delinquency"]
+        up = [(x, sy(v)) for x, v in zip(xs, [last] + [q["hi"] for q in ps])]
+        dn = [(x, sy(v)) for x, v in zip(xs, [last] + [q["lo"] for q in ps])][::-1]
+        poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in up + dn)
+        p.append(f'<polygon points="{poly}" fill="{col}" fill-opacity="0.12"/>')
+        line = " ".join(f"{x:.1f},{sy(v):.1f}" for x, v in zip(xs, [last] + [q["level"] for q in ps]))
+        p.append(f'<polyline points="{line}" fill="none" stroke="{col}" stroke-width="2.2" stroke-linejoin="round"/>')
+        p.append(text(xs[-1] + 8, sy(ps[-1]["level"]) + 4, name.replace("_", " ").title(), 12, color=col, weight="bold"))
+    return wrap(W, H, "Projected Delinquency Rate Under Baseline, Adverse and Severely Adverse Illustrative Scenarios", p)
+
+
 def banner_svg(t: dict) -> str:
     W, H = 1200, 240
     p: List[str] = [
@@ -386,6 +426,7 @@ def sample_output_lines(rows: List[dict]) -> List[str]:
 
 def build_all(rows: List[dict]) -> Dict[str, Dict[str, str]]:
     """Return {name: {"light": svg, "dark": svg}} for every visual."""
+    proj = scenario.compute(scenario.DEFAULT_SCENARIO_FILE)[3]
     makers = {
         "banner": banner_svg,
         "delinquency_over_time": lambda t: line_svg(rows, t),
@@ -393,6 +434,7 @@ def build_all(rows: List[dict]) -> Dict[str, Dict[str, str]]:
         "coefficients": lambda t: coef_svg(rows, t),
         "actual_vs_fitted": lambda t: fitted_svg(rows, t),
         "driver_correlations": lambda t: heatmap_svg(rows, t),
+        "scenario_paths": lambda t: scenario_svg(rows, {n: r["proj"] for n, r in proj.items()}, t),
     }
     out: Dict[str, Dict[str, str]] = {}
     for name, make in makers.items():

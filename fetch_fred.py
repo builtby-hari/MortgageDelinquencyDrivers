@@ -16,12 +16,12 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 RETRY_DELAYS = (2, 4, 4)  # seconds before each of the 3 retries
 
 
-def fetch(series_id: str) -> str:
+def fetch(series_id: str, opener=urllib.request.urlopen) -> str:
     url = URL.format(series_id)
     # Default urllib User-Agent on purpose: FRED stalls requests with custom User-Agents.
     for attempt in range(len(RETRY_DELAYS) + 1):
         try:
-            with urllib.request.urlopen(url, timeout=30) as resp:
+            with opener(url, timeout=30) as resp:
                 return resp.read().decode("utf-8")
         except (urllib.error.URLError, OSError):
             if attempt == len(RETRY_DELAYS):

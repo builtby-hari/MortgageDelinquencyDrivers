@@ -3,9 +3,9 @@
   <img alt="Mortgage Delinquency Drivers: What Moves the Mortgage Delinquency Rate: OLS with Newey-West Errors" src="docs/banner.svg" width="100%">
 </picture>
 
-![Python](https://img.shields.io/badge/python-3.9%2B-1f3a5f) ![Tests](https://img.shields.io/badge/tests-19%20passing-14b8a6) ![Dependencies](https://img.shields.io/badge/dependencies-none-1f3a5f) ![License](https://img.shields.io/badge/license-MIT-14b8a6)
+![Python](https://img.shields.io/badge/python-3.9%2B-1f3a5f) ![Dependencies](https://img.shields.io/badge/dependencies-none-1f3a5f) ![License](https://img.shields.io/badge/license-MIT-14b8a6)
 
-Do changes in unemployment and mortgage rates explain quarterly changes in the U.S. single-family mortgage delinquency rate? This project builds a quarterly panel from public FRED data (1991–2026), fits OLS models with Newey-West standard errors, and tests how the answer changes across sample windows. Pure Python, standard library only.
+Do changes in unemployment and mortgage rates explain quarterly changes in the U.S. single-family mortgage delinquency rate? This project builds a quarterly panel from public FRED data (1991 to 2026), fits OLS models with Newey-West standard errors, and tests how the answer changes across sample windows. Pure Python, standard library only.
 
 ## Contents
 
@@ -16,6 +16,7 @@ Do changes in unemployment and mortgage rates explain quarterly changes in the U
 - [Charts](#charts)
 - [Sample Output](#sample-output)
 - [Methodology](#methodology)
+- [Scenario Projection](#scenario-projection)
 - [Optional Matplotlib Plots](#optional-matplotlib-plots)
 - [Skills Shown](#skills-shown)
 - [Limitations](#limitations)
@@ -52,12 +53,12 @@ Coefficients with Newey-West t-statistics in parentheses. Bold marks |t| > 3.
 
 | Model | Regressors | Sample | n | R² |
 |---|---|---|---:|---:|
-| M1 | Δ unemployment | 1991Q2–2026Q2 | 141 | 0.043 |
-| M2 | Δ unemployment, Δ mortgage rate | 1991Q2–2026Q2 | 141 | 0.061 |
-| M3 | M2 plus one-quarter lags | 1991Q2–2026Q2 | 140 | 0.144 |
-| M4 | M2, excluding 2020Q1–2020Q4 | 1991Q2–2026Q2 | 137 | 0.389 |
-| M5 | M2 | 1991Q2–2019Q4 | 115 | 0.450 |
-| M6 | M2 | 2021Q1–2026Q2 | 22 | 0.366 |
+| M1 | Δ unemployment | 1991Q2-2026Q2 | 141 | 0.043 |
+| M2 | Δ unemployment, Δ mortgage rate | 1991Q2-2026Q2 | 141 | 0.061 |
+| M3 | M2 plus one-quarter lags | 1991Q2-2026Q2 | 140 | 0.144 |
+| M4 | M2, excluding 2020Q1-2020Q4 | 1991Q2-2026Q2 | 137 | 0.389 |
+| M5 | M2 | 1991Q2-2019Q4 | 115 | 0.450 |
+| M6 | M2 | 2021Q1-2026Q2 | 22 | 0.366 |
 
 | Term | M1 | M2 | M3 | M4 | M5 | M6 |
 |---|---:|---:|---:|---:|---:|---:|
@@ -85,6 +86,9 @@ flowchart LR
 
 ```bash
 python3 analysis.py            # prints the six models and writes panel.csv
+python3 analysis.py --diagnostics   # also prints ADF and Durbin-Watson checks
+python3 analysis.py --scenario scenarios/illustrative.csv   # 9-quarter scenario projection
+python3 analysis.py --scenario scenarios/fed_2026.csv --rebase   # Federal Reserve 2026 paths
 python3 -m unittest discover   # runs the test suite
 python3 charts.py              # regenerates every SVG in docs/ (light and dark)
 python3 fetch_fred.py          # optional: refresh data/ from FRED (no API key)
@@ -197,7 +201,115 @@ $$\widehat{\mathrm{Var}}(\hat\beta) = (X^\top X)^{-1}\, \hat S\, (X^\top X)^{-1}
 
 Lag products pair only observations exactly $\ell$ quarters apart, so models that drop quarters (M4 to M6) do not bridge the gaps.
 
-**Fit.** $$R^2 = 1 - \frac{\sum_t e_t^2}{\sum_t (y_t - \bar y)^2}$$
+**Lag Length and Diagnostics.** All models use 4 lags. The Newey-West (1994) rule of thumb $\lfloor 4 (n/100)^{2/9} \rfloor$ gives 4 for the full sample (n = 140) and 2 for M6 (n = 22). Lag choice is a judgment call and published guidance differs (Lazarus, Lewis, Stock and Watson 2018 recommend longer truncation with fixed-b critical values), so the table below shows how the t-statistics move. It was computed with the same code, not tuned.
+
+| Model | Term | 0 lags | 4 lags (used) | 8 lags | 15 lags |
+|---|---|---|---|---|---|
+| M1 (n = 141) | Δ unemployment | 1.52 | 1.07 | 1.02 | 1.00 |
+| M2 (n = 141) | Δ unemployment | 1.50 | 1.06 | 1.01 | 0.99 |
+| M3 (n = 140) | Δ unemployment, lag 1 | 2.82 | 1.68 | 1.55 | 1.48 |
+
+Full-sample conclusions do not depend on the lag: Δ unemployment is never significant, and longer lags only make the lagged-term evidence weaker. M6 is different. Its Durbin-Watson is 2.36 (no positive autocorrelation), and with only 22 quarters the Δ unemployment t-statistic is 1.98, 3.25, 4.06 and 5.36 at 0, 2, 4 and 8 lags, so more lags make it larger, not smaller. Treat M6's standard errors as unreliable at any lag; the 4-lag figure is neither clearly conservative nor aggressive.
+
+`python3 analysis.py --diagnostics` prints, without changing any model output, an Augmented Dickey-Fuller test (constant, 4 lags) and the Durbin-Watson statistic for each model. ADF critical values are MacKinnon (2010) finite-sample response-surface values for each regression's n (about -2.88 at 5% for these samples; asymptotic values are -3.43, -2.86 and -2.57 at 1%, 5% and 10%). They were checked against the statsmodels `adfvalues` coefficients. On the current data the unemployment and mortgage-rate changes reject a unit root at 5%, but the delinquency change does not (stat -2.63 vs critical -2.88). Durbin-Watson is about 0.55 for M1 to M3, which is strong positive residual autocorrelation and is why Newey-West errors matter here. These are quick checks, not a full specification search.
+
+Sources: MacKinnon (2010), "Critical Values for Cointegration Tests," Queen's University Working Paper 1227; MacKinnon (1996), Journal of Applied Econometrics 11(6); Newey and West (1994), Review of Economic Studies 61(4); Lazarus, Lewis, Stock and Watson (2018), "HAR Inference: Recommendations for Practice," Journal of Business and Economic Statistics 36(4).
+
+**Fit.**
+
+$$R^2 = 1 - \frac{\sum_t e_t^2}{\sum_t (y_t - \bar y)^2}$$
+
+## Scenario Projection
+
+The regression becomes a scenario tool: give it quarterly paths for the unemployment rate and the 30-year mortgage rate, and it projects the bank-held single-family delinquency rate for 9 quarters, with a rough loss illustration on top. This is the kind of stress question a bank credit or FIG team asks: what happens to mortgage credit if unemployment rises 4 points?
+
+```bash
+python3 analysis.py --scenario scenarios/illustrative.csv
+python3 analysis.py --scenario scenarios/illustrative.csv --model M5 --roll-rate 0.15 --lgd 0.30 --portfolio 25000
+```
+
+The scenario file is a CSV with `scenario,quarter,unemployment,mortgage_rate` columns (levels, in percent). Each scenario must cover exactly the 9 quarters after the last observed quarter (2026Q3 to 2028Q3), or the run stops with an error naming the missing quarters. Reading a scenario file writes nothing, so `panel.csv` is untouched.
+
+**Which Model.** M4 by default (M2 without the four 2020 quarters, n = 137), because 2020 distorts the full-sample fit. `--model` takes M1 to M6; M3 uses the last observed change for its first lag. Each projected quarter is the model's change, $\hat\beta^\top x_t$, where $x_t$ holds the change in each path versus the prior quarter. The changes are summed onto the last observed rate (1.86% in 2026Q2).
+
+**Bands.** The level after $h$ quarters is a sum of $h$ changes, so its variance is $c^\top V c + h\hat\sigma^2$. Here $c$ is the sum of the $h$ regressor vectors, $V$ is the Newey-West coefficient covariance (4 lags, from `ols.py`), and $\hat\sigma^2$ is the residual variance. The band is plus or minus 1.96 standard errors. Residual shocks are treated as independent across quarters even though the residuals are autocorrelated, so the band is probably too narrow at long horizons. Both terms grow with the horizon, so bands widen.
+
+**Loss Illustration.** A teaching example, not a CECL model. Each quarter, a fixed share of the delinquent balance rolls to default (`--roll-rate`, default 20%), and a fixed share of that is lost (`--lgd`, default 25%). Summing 9 quarters gives a cumulative loss rate on an illustrative portfolio (`--portfolio`, default $10,000 million). It ignores amortization, cures, recovery timing, discounting and any lifetime-loss or reasonable-and-supportable forecast logic that CECL requires. Roll rate and LGD are placeholders, not estimates.
+
+**Scenario Paths Are Illustrative.** `scenarios/illustrative.csv` holds stylized paths I wrote: baseline is flat at the 2026Q2 levels (unemployment 4.3%, mortgage rate 6.4%), adverse lifts unemployment to 6.4% and cuts the rate to 5.5%, and severely adverse lifts unemployment to 8.6% and cuts the rate to 4.6%. They are not the Federal Reserve's supervisory stress test paths and not a forecast. To use published paths, enter them in the same CSV with the source and date in your notes.
+
+**Federal Reserve 2026 Scenarios.** `scenarios/fed_2026.csv` holds the Fed's final 2026 supervisory baseline and severely adverse paths for the unemployment rate and the 30-year mortgage rate, from [Tables 3.A and 4.A](https://www.federalreserve.gov/publications/2026-stress-test-scenarios.htm) (final scenarios dated February 4, 2026; page updated February 17, 2026). Source details are in `scenarios/README.md`. The Fed's paths start in 2026Q1, so its 2026Q2 values differ from the observed data. By default the file's levels are used as published; `--rebase` shifts each path so its 2026Q2 row equals the observed 4.3% and 6.4%, keeping the Fed's quarterly changes. The as-published run is a one-quarter jump of about 4 points in unemployment, which the model treats as one very large change, so I read the re-based run as the more sensible one.
+
+```bash
+python3 analysis.py --scenario scenarios/fed_2026.csv --rebase
+```
+
+| Scenario (M4) | Peak Unemployment | 2028Q3 Delinquency, As Published (95% Band) | Loss Rate | 2028Q3 Delinquency, Re-based (95% Band) | Loss Rate |
+|---|---:|---:|---:|---:|---:|
+| Baseline | 4.6% | 2.02% (0.44 to 3.60) | 0.91% | 1.79% (0.24 to 3.35) | 0.81% |
+| Severely adverse | 10.0% | 5.04% (2.48 to 7.61) | 2.42% | 3.03% (1.23 to 4.83) | 1.52% |
+
+Loss rates use the default teaching placeholders (20% roll rate, 25% LGD, 9 quarters). Re-based peak unemployment is 7.1% for the severely adverse path.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/scenario_paths-dark.svg">
+  <img alt="Line Chart of the Delinquency Rate over the Last 20 Observed Quarters, Then Nine Projected Quarters for Baseline, Adverse and Severely Adverse Illustrative Scenarios, Each with a 95 Percent Band. Severely Adverse Reaches About 4.9 Percent." src="docs/scenario_paths.svg" width="100%">
+</picture>
+
+<details>
+<summary>Sample Output</summary>
+
+```text
+Scenario projection, model M4  M2 excluding 2020 pandemic (n=137), starting 2026Q2 delinquency 1.86%
+Bands: 95%, coefficient uncertainty (Newey-West) plus residual noise, 9 quarters.
+
+baseline
+  Quarter   Unemp   Rate   Change   Level     Low    High
+  2026Q3     4.30   6.40    0.039    1.90    1.41    2.38
+  2026Q4     4.30   6.40    0.016    1.91    1.22    2.61
+  2027Q1     4.30   6.40    0.016    1.93    1.07    2.79
+  2027Q2     4.30   6.40    0.016    1.95    0.94    2.95
+  2027Q3     4.30   6.40    0.016    1.96    0.83    3.10
+  2027Q4     4.30   6.40    0.016    1.98    0.72    3.23
+  2028Q1     4.30   6.40    0.016    1.99    0.62    3.36
+  2028Q2     4.30   6.40    0.016    2.01    0.53    3.49
+  2028Q3     4.30   6.40    0.016    2.02    0.44    3.61
+
+adverse
+  Quarter   Unemp   Rate   Change   Level     Low    High
+  2026Q3     4.60   6.20    0.243    2.10    1.59    2.61
+  2026Q4     5.00   6.00    0.289    2.39    1.62    3.17
+  2027Q1     5.40   5.80    0.289    2.68    1.67    3.69
+  2027Q2     5.80   5.60    0.289    2.97    1.73    4.21
+  2027Q3     6.10   5.50    0.221    3.19    1.76    4.62
+  2027Q4     6.30   5.50    0.153    3.35    1.75    4.94
+  2028Q1     6.40   5.50    0.085    3.43    1.70    5.16
+  2028Q2     6.40   5.50    0.016    3.45    1.61    5.28
+  2028Q3     6.40   5.50    0.016    3.46    1.52    5.40
+
+severely_adverse
+  Quarter   Unemp   Rate   Change   Level     Low    High
+  2026Q3     4.90   6.00    0.448    2.31    1.75    2.87
+  2026Q4     5.60   5.60    0.494    2.80    1.90    3.70
+  2027Q1     6.40   5.20    0.563    3.37    2.11    4.62
+  2027Q2     7.20   4.90    0.564    3.93    2.32    5.54
+  2027Q3     7.90   4.70    0.496    4.43    2.50    6.35
+  2027Q4     8.40   4.60    0.359    4.78    2.60    6.97
+  2028Q1     8.60   4.60    0.153    4.94    2.59    7.28
+  2028Q2     8.60   4.60    0.016    4.95    2.52    7.39
+  2028Q3     8.50   4.60   -0.053    4.90    2.40    7.40
+
+Loss illustration (teaching example, not a CECL model)
+  Portfolio $10,000mm, roll to default 20% of delinquent balance per quarter, LGD 25%, 9 quarters
+  Scenario           Loss Rate     Low    High  Loss $mm
+  baseline               0.88%   0.39%   1.38%      88.3
+  adverse                1.35%   0.75%   1.95%     135.1
+  severely_adverse       1.82%   1.03%   2.61%     182.0
+```
+
+</details>
+
+Read the result with care. The model is a bank-held-loan, quarterly-change regression with R-squared near 0.4 outside 2020. The 2020 episode is excluded, and the paths are far outside most of the sample for the severe case. The point is the mechanics and the width of the bands, not the point forecast.
 
 ## Optional Matplotlib Plots
 
@@ -217,7 +329,7 @@ Python · Econometrics · Time Series · Data Visualization
 
 - **Associations, not causes.** Unemployment, rates, and delinquency all respond to the same economic conditions.
 - **Few independent episodes.** About 140 quarters contain only a handful of recessions, so a few episodes can drive the estimates. M6 has 22 quarters, which is too short for reliable Newey-West errors.
-- **Quarterly averages smooth within-quarter timing,** so the lag structure is approximate.
+- **Quarterly averages.** They smooth within-quarter timing, so the lag structure is approximate.
 - **Bank-held loans only.** The delinquency series covers loans held by commercial banks. It is not the agency (government-sponsored enterprise) book, so the findings should not be read as a statement about agency pools.
 - **Revisions.** FRED series can be revised, and the latest delinquency quarter is published with a lag.
 - **Recession bands are hardcoded.** The NBER dates in `charts.py` are not read from a data file. They are quarter-level and used only for shading.
@@ -229,10 +341,12 @@ Python · Econometrics · Time Series · Data Visualization
 MortgageDelinquencyDrivers/
 ├── analysis.py              builds the quarterly panel, runs the six models, writes panel.csv
 ├── ols.py                   matrix inverse, OLS, Newey-West standard errors
+├── scenario.py              scenario projection with bands, loss illustration
+├── scenarios/               scenario paths (CSV): illustrative and Federal Reserve 2026, with sources
 ├── charts.py                hand-written SVG visuals, light and dark
 ├── plots_mpl.py             optional matplotlib PNGs (needs requirements-extra.txt)
 ├── fetch_fred.py            downloads the three FRED series into data/
-├── test_analysis.py         unit tests (19 pass; 1 matplotlib test skips without matplotlib)
+├── test_analysis.py         unit tests
 ├── requirements-extra.txt   optional matplotlib dependency
 ├── data/                    pinned FRED snapshot
 ├── docs/                    SVG visuals (light and -dark), sample output, docs/mpl/ PNGs
@@ -277,9 +391,8 @@ MIT. See [LICENSE](LICENSE).
 | Regressor | An input variable used to explain the outcome, such as the unemployment change. |
 | Revision | A later correction to a published number, so older data can change. |
 | Standard Error | The typical size of the uncertainty around an estimate, like the margin of error in a poll. |
-| t-Statistic | An estimate divided by its standard error; the larger the size, the less likely the result is just chance. |
+| t-Statistic | An estimate divided by its standard error; the larger its absolute value, the less likely the result is just chance. |
 | Unemployment Rate | The share of people in the labor force who are actively looking for work but have no job. |
-
 
 ---
 

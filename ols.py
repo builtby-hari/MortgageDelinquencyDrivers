@@ -21,10 +21,11 @@ def matmul(A: Matrix, B: Matrix) -> Matrix:
 def inverse(A: Matrix) -> Matrix:
     """Gauss-Jordan inverse with partial pivoting."""
     n = len(A)
+    tol = 1e-12 * max(abs(v) for row in A for v in row)  # relative to matrix scale
     M = [list(row) + [1.0 if i == j else 0.0 for j in range(n)] for i, row in enumerate(A)]
     for c in range(n):
         p = max(range(c, n), key=lambda r: abs(M[r][c]))
-        if abs(M[p][c]) < 1e-12:
+        if abs(M[p][c]) < tol:
             raise ValueError("matrix is singular")
         M[c], M[p] = M[p], M[c]
         piv = M[c][c]
@@ -36,16 +37,32 @@ def inverse(A: Matrix) -> Matrix:
     return [row[n:] for row in M]
 
 
+def default_nw_lags(n: int) -> int:
+    """Newey-West (1994) rule of thumb: floor(4 * (n / 100) ** (2 / 9)). Gives 4 for n = 140."""
+    return int(4 * (n / 100.0) ** (2.0 / 9.0))
+
+
 def ols(X: Matrix, y: Sequence[float], nw_lags: int = 4, index: Optional[Sequence[int]] = None):
-    """Return dict with coef, se (Newey-West), t, r2, n.
+    """Return dict with coef, se (Newey-West), cov (Newey-West covariance matrix), sigma2 (residual variance),
+    se_classical (homoskedastic), t, r2, n, resid.
 
     `index` gives each row's position in time (for example, a quarter number). Newey-West lag products
     then pair only rows exactly `lag` periods apart, so gaps from dropped periods are not bridged.
     If omitted, rows are treated as consecutive.
     """
+    if not X:
+        raise ValueError("X is empty")
     n, k = len(X), len(X[0])
+    if len(y) != n or any(len(row) != k for row in X):
+        raise ValueError("X rows must all have the same length and match len(y)")
+    if n <= k:
+        raise ValueError(f"need more observations than regressors (n={n}, k={k})")
+    if nw_lags < 0:
+        raise ValueError("nw_lags must be >= 0")
     if index is None:
         index = list(range(n))
+    if len(index) != n or len(set(index)) != n:
+        raise ValueError("index must have one unique value per row")
     position = {idx: t for t, idx in enumerate(index)}
     Xt = transpose(X)
     XtX_inv = inverse(matmul(Xt, X))
@@ -80,5 +97,7 @@ def ols(X: Matrix, y: Sequence[float], nw_lags: int = 4, index: Optional[Sequenc
     ss_tot = sum((v - ybar) ** 2 for v in y)
     ss_res = sum(e * e for e in resid)
     r2 = 1 - ss_res / ss_tot if ss_tot else 0.0
-    return {"coef": beta, "se": se, "t": [b / s if s else float("nan") for b, s in zip(beta, se)],
-            "r2": r2, "n": n, "resid": resid}
+    s2 = ss_res / (n - k)
+    se_classical = [math.sqrt(s2 * XtX_inv[i][i]) for i in range(k)]
+    return {"coef": beta, "se": se, "se_classical": se_classical, "t": [b / s if s else float("nan") for b, s in zip(beta, se)],
+            "r2": r2, "n": n, "resid": resid, "cov": V, "sigma2": s2}
